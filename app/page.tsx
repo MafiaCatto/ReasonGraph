@@ -54,13 +54,20 @@ export default function Home() {
       return { ...c, weight };
     }));
   }
+  function resetWorkspace() {
+    setQuestion("What should I optimize for in the next two years of my career?");
+    setCriteria(initialCriteria);
+    setOptions(initialOptions);
+    setConfidence(68);
+    setView("matrix");
+  }
 
   return (
     <main>
       <header>
         <a href="#" className="logo"><span className="logo-glyph">R</span> ReasonGraph <i>LAB</i></a>
         <div className="header-note">Decision intelligence for consequential choices</div>
-        <button className="export" onClick={() => window.print()}>Export brief ↗</button>
+        <div className="header-actions"><button className="reset-workspace" onClick={resetWorkspace}>Reset example</button><button className="export" onClick={() => window.print()}>Export brief ↗</button></div>
       </header>
 
       <section className="hero">
