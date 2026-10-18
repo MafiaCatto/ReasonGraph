@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { DECISION_TEMPLATES } from "../lib/templates";
 
 type HeaderProps = {
@@ -10,6 +10,7 @@ type HeaderProps = {
   onOpenExport: () => void;
   onExportJson: () => void;
   onImportJson: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onShareLink: () => Promise<boolean>;
 };
 
 export function Header({
@@ -19,8 +20,18 @@ export function Header({
   onOpenExport,
   onExportJson,
   onImportJson,
+  onShareLink,
 }: HeaderProps) {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const [copiedLink, setCopiedLink] = useState(false);
+
+  async function handleShare() {
+    const success = await onShareLink();
+    if (success) {
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
+    }
+  }
 
   return (
     <header>
@@ -48,6 +59,14 @@ export function Header({
 
         <button className="action-btn" onClick={onReset} title="Reset to template defaults">
           Reset
+        </button>
+
+        <button
+          className="action-btn"
+          onClick={handleShare}
+          title="Encode decision into shareable URL hash"
+        >
+          {copiedLink ? "✓ Link Copied!" : "🔗 Share Link"}
         </button>
 
         <button

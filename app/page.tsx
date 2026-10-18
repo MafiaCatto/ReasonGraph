@@ -21,10 +21,21 @@ export default function Home() {
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
 
-  // Restore decision from localStorage on client mount
+  // Restore decision from URL hash or localStorage on client mount
   useEffect(() => {
     setIsMounted(true);
     try {
+      const hash = window.location.hash;
+      if (hash.startsWith("#d=")) {
+        const jsonStr = decodeURIComponent(atob(hash.slice(3)));
+        const parsed = JSON.parse(jsonStr);
+        if (parsed && parsed.criteria && parsed.options) {
+          setDecision(parsed);
+          setActiveTemplate("custom");
+          return;
+        }
+      }
+
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
@@ -34,7 +45,7 @@ export default function Home() {
         }
       }
     } catch {
-      // Ignore parse errors on corrupted local storage
+      // Ignore parse errors on corrupted local storage or hash
     }
   }, []);
 
@@ -222,6 +233,19 @@ export default function Home() {
     }));
   }
 
+  async function handleShareLink(): Promise<boolean> {
+    try {
+      const jsonStr = JSON.stringify(decision);
+      const encoded = btoa(encodeURIComponent(jsonStr));
+      const url = `${window.location.origin}${window.location.pathname}#d=${encoded}`;
+      window.history.replaceState(null, "", `#d=${encoded}`);
+      await navigator.clipboard.writeText(url);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   return (
     <main>
       <Header
@@ -231,6 +255,7 @@ export default function Home() {
         onOpenExport={() => setIsExportModalOpen(true)}
         onExportJson={handleExportJson}
         onImportJson={handleImportJson}
+        onShareLink={handleShareLink}
       />
 
       <section className="hero">

@@ -147,6 +147,111 @@ representing the 5th-percentile downside outcome below which only 5% of simulate
 
 ---
 
+## ⚖️ System Limitations & Architectural Trade-offs
+
+A core engineering principle behind ReasonGraph is balancing **mathematical fidelity** against **cognitive friction**. During the design phase, an important architectural choice was made regarding criteria independence.
+
+### 1. The Independence Assumption (v1 Design Decision)
+Standard Multi-Attribute Utility Theory (MAUT) assumes that criteria are **mutually preference-independent**. In ReasonGraph v1, each criterion is evaluated as an orthogonal dimension:
+
+$$\text{Cov}(S_i, S_j) = 0 \quad \forall \; i \ne j$$
+
+#### Why this was chosen for v1:
+- **Low Cognitive Friction**: The primary failure mode of decision tools is user abandonment. Forcing users to define joint probability distributions, conditional probability tables (CPTs), or draw complex node networks before getting an answer creates massive input fatigue.
+- **Sub-25ms Simulation Performance**: Sampling independent Beta-PERT variates allows pre-allocated `Float32Array` buffers to complete 10,000 trials in $<25\text{ ms}$ on a single thread without blocking UI interaction or requiring heavy WebAssembly runtimes.
+
+---
+
+### 2. The Real-World Limitation: Conditional Dependencies
+In consequential real-world decisions, criteria are rarely fully independent. For example, in an infrastructure decision:
+- An option scoring high in **Architectural Complexity** will almost certainly drive up **Operational Overhead**.
+- Increased **Operational Overhead** directly degrades **Financial Runway** and **Time to Market**.
+
+Treating them as orthogonal can underestimate tail risk if multiple negatively correlated variables degrade simultaneously.
+
+---
+
+### 3. Proposed v2 Architecture: Directed Acyclic Graph (DAG) Layer
+
+To model cascading risk without compromising user experience, the planned v2 architecture introduces an optional **Causal Graph Layer**:
+
+```mermaid
+graph LR
+    Complexity["Architectural Complexity (Root)"] -->|"+0.60"| Overhead["Operational Overhead"]
+    Complexity -->|"+0.40"| Cost["Infrastructure Cost"]
+    Overhead -->|"+0.50"| Cost
+    Cost --> Utility["Composite Utility (Sink)"]
+```
+
+#### Graph Formulation & Kahn's Algorithm (Topological Sort)
+Let $G = (V, E)$ be a directed graph where vertices $V$ represent criteria, and directed edges $(u, v) \in E$ represent causal influence with weight $\beta_{uv} \in [-1, 1]$.
+
+To evaluate cascading effects in order, the graph must be a **DAG** (no circular dependencies like $A \to B \to A$). We apply **Kahn's Algorithm** for topological ordering and cycle detection:
+
+```typescript
+function getTopologicalOrder(criteria: Criterion[], edges: CausalEdge[]): string[] {
+  const inDegree = new Map<string, number>();
+  const adj = new Map<string, string[]>();
+
+  for (const c of criteria) {
+    inDegree.set(c.id, 0);
+    adj.set(c.id, []);
+  }
+
+  for (const { from, to } of edges) {
+    adj.get(from)?.push(to);
+    inDegree.set(to, (inDegree.get(to) ?? 0) + 1);
+  }
+
+  // Queue nodes with in-degree 0 (independent root variables)
+  const queue: string[] = [];
+  for (const [id, deg] of inDegree.entries()) {
+    if (deg === 0) queue.push(id);
+  }
+
+  const order: string[] = [];
+  while (queue.length > 0) {
+    const node = queue.shift()!;
+    order.push(node);
+
+    for (const neighbor of adj.get(node) ?? []) {
+      const nextDeg = (inDegree.get(neighbor) ?? 1) - 1;
+      inDegree.set(neighbor, nextDeg);
+      if (nextDeg === 0) queue.push(neighbor);
+    }
+  }
+
+  // Cycle detection: if order length doesn't match total vertices, a cycle exists
+  if (order.length !== criteria.length) {
+    throw new Error("CycleDetectedError: Circular dependency found in causal graph.");
+  }
+
+  return order;
+}
+```
+
+#### The Mathematical Hurdle: Covariance vs. The Iman-Conover Method
+A naive implementation would simply compute downstream scores using linear scalar shifts:
+$$S_v = S_v + \beta_{uv} \cdot (S_u - \mu_u)$$
+
+**Why naive scalar propagation fails mathematically:**
+1. It distorts the defined $[1, 10]$ boundaries of the distribution.
+2. It destroys the Beta-PERT probability density curve, turning a carefully modeled bounded estimate into an arbitrary skewed distribution.
+
+**The Mathematically Rigorous Solution (Planned for v2):**
+To induce rank correlation between non-normal distributions without altering their marginal distributions, v2 will implement the **Iman-Conover Method (1982)**:
+1. Generate an independent sample matrix $\mathbf{X}_{N \times n}$ where each column follows its respective Beta-PERT distribution.
+2. Construct the desired correlation matrix $\mathbf{C}$ from the DAG edges and factor it using **Cholesky Decomposition**: $\mathbf{C} = \mathbf{L}\mathbf{L}^T$.
+3. Transform a set of standard normal scores by $\mathbf{L}$ to induce the target correlation structure.
+4. Reorder the original Beta-PERT sample values to match the rank order of the correlated normal scores, exactly preserving each variable's marginal Beta-PERT distribution while honoring the DAG dependencies.
+
+---
+
+### 4. Engineering Summary
+By shipping v1 with **MAUT + Beta-PERT Monte Carlo**, ReasonGraph delivers immediate, bounded risk modeling without cognitive fatigue. The DAG architecture is formally specified for v2 as an opt-in mode for advanced quantitative modeling.
+
+---
+
 ## License
 
 MIT
