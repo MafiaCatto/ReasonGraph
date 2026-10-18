@@ -9,6 +9,7 @@ import { Header } from "../components/Header";
 import { CriteriaPanel } from "../components/CriteriaPanel";
 import { MatrixPanel } from "../components/MatrixPanel";
 import { RedTeamPanel } from "../components/RedTeamPanel";
+import { MonteCarloView } from "../components/MonteCarloView";
 import { ExportModal } from "../components/ExportModal";
 
 const STORAGE_KEY = "reasongraph_active_decision";
@@ -16,7 +17,7 @@ const STORAGE_KEY = "reasongraph_active_decision";
 export default function Home() {
   const [activeTemplate, setActiveTemplate] = useState<string>("career");
   const [decision, setDecision] = useState<Decision>(() => DECISION_TEMPLATES.career);
-  const [view, setView] = useState<"matrix" | "insights">("matrix");
+  const [view, setView] = useState<"matrix" | "insights" | "monte-carlo">("matrix");
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
 
@@ -258,9 +259,15 @@ export default function Home() {
         >
           02 · Stress test & Red team <span>{analysis.insights.length}</span>
         </button>
+        <button
+          className={view === "monte-carlo" ? "active" : ""}
+          onClick={() => setView("monte-carlo")}
+        >
+          03 · Monte Carlo simulation 🎲 <span>{analysis.monteCarlo?.leaderProbability ?? 0}%</span>
+        </button>
       </nav>
 
-      {view === "matrix" ? (
+      {view === "matrix" && (
         <section className="canvas">
           <CriteriaPanel
             criteria={decision.criteria}
@@ -287,13 +294,24 @@ export default function Home() {
             onSetConfidence={(val) => setDecision((prev) => ({ ...prev, confidence: val }))}
           />
         </section>
-      ) : (
+      )}
+
+      {view === "insights" && (
         <RedTeamPanel
           leader={analysis.leader}
           runnerUp={analysis.runnerUp}
           margin={analysis.margin}
           breakEvens={analysis.breakEvens}
           insights={analysis.insights}
+        />
+      )}
+
+      {view === "monte-carlo" && (
+        <MonteCarloView
+          criteria={decision.criteria}
+          options={decision.options}
+          confidence={decision.confidence}
+          initialResult={analysis.monteCarlo}
         />
       )}
 

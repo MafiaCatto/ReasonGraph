@@ -23,8 +23,15 @@ ReasonGraph tackles these directly by separating **values** (weights) from **evi
 ## Key Features
 
 - **Weighted Decision Matrix**: Score competing options against customizable criteria with single-click proportional weight normalization.
+- **Monte Carlo Probabilistic Simulation Engine**:
+  - Simulates 10,000 alternate futures using continuous **Beta-PERT probability distributions** ($a$: pessimistic, $m$: most likely, $b$: optimistic).
+  - Quantifies **True Win Probability** (e.g. Option A wins in 68.4% of simulated futures).
+  - Computes **Percentile Spreads** (P10 bear case, P50 median, P90 bull case).
+  - Evaluates **Value-at-Risk (VaR 95%)** to measure exposure to catastrophic downside tails.
+  - Renders **Interactive Overlapping SVG Probability Density Curves**.
 - **Break-Even Sensitivity Analysis**: Calculates the exact point delta ($\Delta$) required on each criterion for the runner-up to bridge the margin and overturn the leader.
 - **Dynamic Red-Team Stress Test**:
+  - **Probabilistic Inversion Alert**: Flags scenarios where the deterministic leader has a lower probability of winning due to extreme volatility.
   - **Lead Fragility Indicator**: Highlights when a leader holds a fragile victory margin (< 0.6 pts) versus a robust advantage.
   - **Single Point of Failure (SPOF)**: Identifies which criterion carries the highest decision leverage.
   - **Pareto Dominance Detector**: Flags strictly inferior options that can be safely eliminated.
@@ -52,14 +59,14 @@ flowchart TD
         Engine --> Scores[Weighted Score Computation: MAUT]
         Engine --> BreakEven[Break-Even Pivot Analysis]
         Engine --> Dominance[Pareto Efficiency Engine]
+        Engine --> MonteCarlo[lib/monte-carlo.ts: Beta-PERT 10,000 Trials]
         Engine --> RedTeam[Red-Team Stress-Test Rules]
     end
 
     subgraph User Interface
-        Scores --> MatrixView[Decision Matrix UI]
-        BreakEven --> RedTeamView[Stress Test & Red Team UI]
-        Dominance --> RedTeamView
-        RedTeam --> RedTeamView
+        Scores --> MatrixView[01 · Decision Matrix UI]
+        RedTeam --> RedTeamView[02 · Stress Test & Red Team UI]
+        MonteCarlo --> MonteCarloView[03 · Monte Carlo Simulation UI]
     end
 
     subgraph Persistence & Portability
@@ -99,7 +106,7 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ### Running Tests
 
-ReasonGraph includes a comprehensive unit test suite covering weight normalization, score rankings, break-even math, Pareto dominance detection, and Markdown brief synthesis:
+ReasonGraph includes a comprehensive unit test suite covering weight normalization, score rankings, break-even math, Pareto dominance detection, Beta-PERT random variates, and Monte Carlo probability distributions:
 
 ```bash
 npm test
@@ -114,15 +121,29 @@ npm start
 
 ---
 
-## Decision Theory Foundation
+## Decision Theory & Mathematical Foundation
 
-- **Score Calculation**: 
-  $$\text{Score}(O_j) = \frac{\sum_{i=1}^{n} s_{ij} \cdot w_i}{\sum_{i=1}^{n} w_i}$$
-  where $s_{ij} \in [1, 10]$ is the score of option $j$ on criterion $i$, and $w_i \in [0, 100]$ is the criterion weight.
+### 1. Multi-Attribute Utility Score (MAUT)
+$$\text{Score}(O_j) = \frac{\sum_{i=1}^{n} s_{ij} \cdot w_i}{\sum_{i=1}^{n} w_i}$$
+where $s_{ij} \in [1, 10]$ is the score of option $j$ on criterion $i$, and $w_i \in [0, 100]$ is the criterion weight.
 
-- **Break-Even Pivot Delta**:
-  $$\Delta_{i} = \frac{\text{Margin} \times 100}{w_i}$$
-  representing the single-variable score increase the runner-up requires on criterion $i$ to tie the leading option.
+### 2. Break-Even Pivot Delta
+$$\Delta_{i} = \frac{\text{Margin} \times 100}{w_i}$$
+representing the single-variable score increase the runner-up requires on criterion $i$ to tie the leading option.
+
+### 3. Beta-PERT Probability Density Sampling
+For 3-point estimates with pessimistic bound $a$, mode $m$, and optimistic bound $b$:
+- **Expected Value**: $\mu = \frac{a + 4m + b}{6}$
+- **Variance**: $\sigma^2 = \frac{(b - a)^2}{36}$
+- **Beta Shape Parameters**:
+  $$\alpha = 1 + 4 \cdot \frac{m - a}{b - a}, \quad \beta = 1 + 4 \cdot \frac{b - m}{b - a}$$
+- **Simulated Win Probability**:
+  $$P(\text{Win}_j) = \frac{1}{N} \sum_{k=1}^{N} \mathbb{I}\left(T_j^{(k)} = \max_{r} T_r^{(k)}\right)$$
+  where $N = 10{,}000$ independent trials and $T_j^{(k)}$ is the weighted composite utility in simulation trial $k$.
+
+### 4. Value-at-Risk (VaR at 95%)
+$$\text{VaR}_{0.95}(O_j) = \inf \{ t \in \mathbb{R} : P(T_j \le t) \ge 0.05 \}$$
+representing the 5th-percentile downside outcome below which only 5% of simulated futures fall.
 
 ---
 
