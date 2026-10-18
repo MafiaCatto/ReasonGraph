@@ -1,4 +1,5 @@
 import { Criterion, Option, OptionScore, BreakEvenInsight, RedTeamInsight, AnalysisResult } from "./types";
+import { runMonteCarloSimulation } from "./monte-carlo";
 
 /**
  * Normalizes an array of criteria weights to ensure they sum to exactly 100.
@@ -276,6 +277,24 @@ export function analyzeDecision(
   const breakEvens = calculateBreakEvens(leader, runnerUp, criteria);
   const insights = generateRedTeamInsights(rankings, criteria, confidence, breakEvens);
 
+  // Run probabilistic simulation (5,000 iterations for sub-10ms UI performance)
+  const monteCarlo = runMonteCarloSimulation(criteria, options, confidence, 5000);
+
+  // Check for Probabilistic Rank Inversion (deterministic leader has lower win prob)
+  if (leader && monteCarlo.options.length > 1) {
+    const simLeader = monteCarlo.options[0];
+    if (simLeader.optionId !== leader.id && simLeader.winProbability > 50) {
+      insights.unshift({
+        id: "probabilistic-inversion",
+        type: "FRAGILITY",
+        severity: "high",
+        title: `Probabilistic Inversion: "${simLeader.optionName}" Wins ${simLeader.winProbability}% of Simulations`,
+        detail: `While "${leader.name}" has a marginally higher point estimate, "${simLeader.optionName}" wins the majority of simulated futures because it carries significantly lower downside variance.`,
+        recommendation: `Consider selecting "${simLeader.optionName}" as the risk-adjusted superior choice under real-world uncertainty.`,
+      });
+    }
+  }
+
   return {
     rankings,
     leader,
@@ -284,5 +303,6 @@ export function analyzeDecision(
     weightTotal,
     breakEvens,
     insights,
+    monteCarlo,
   };
 }

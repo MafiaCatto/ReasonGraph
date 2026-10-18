@@ -9,7 +9,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "tsx --test tests/engine.test.mjs"
+    "test": "tsx --test tests/engine.test.mjs tests/monte-carlo.test.mjs"
   },
   "dependencies": {
     "next": "16.2.6",
