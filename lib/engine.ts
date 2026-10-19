@@ -7,6 +7,7 @@ import {
   AnalysisResult,
   SensitivityRow,
   MultiMetricSensitivity,
+  MonteCarloResult,
 } from "./types";
 import { runMonteCarloSimulation } from "./monte-carlo";
 
@@ -448,13 +449,51 @@ export function generateRedTeamInsights(
   return insights;
 }
 
+export type AnalyzeOptions = {
+  skipMonteCarlo?: boolean;
+  seed?: number;
+  monteCarloIterations?: number;
+};
+
+/**
+ * Attaches or merges a Monte Carlo simulation result into an existing analysis,
+ * evaluating probabilistic rank inversion insights.
+ */
+export function attachMonteCarloResult(
+  analysis: AnalysisResult,
+  monteCarlo: MonteCarloResult
+): AnalysisResult {
+  const updatedInsights = [...analysis.insights.filter((i) => i.id !== "probabilistic-inversion")];
+
+  if (analysis.leader && monteCarlo.options.length > 1) {
+    const simLeader = monteCarlo.options[0];
+    if (simLeader.optionId !== analysis.leader.id && simLeader.winProbability > 50) {
+      updatedInsights.unshift({
+        id: "probabilistic-inversion",
+        type: "FRAGILITY",
+        severity: "high",
+        title: `Probabilistic Inversion: "${simLeader.optionName}" Wins ${simLeader.winProbability}% of Simulations`,
+        detail: `While "${analysis.leader.name}" has a marginally higher point estimate, "${simLeader.optionName}" wins the majority of simulated futures because it carries significantly lower downside variance.`,
+        recommendation: `Consider selecting "${simLeader.optionName}" as the risk-adjusted superior choice under real-world uncertainty.`,
+      });
+    }
+  }
+
+  return {
+    ...analysis,
+    insights: updatedInsights,
+    monteCarlo,
+  };
+}
+
 /**
  * Runs complete analysis suite on a decision model.
  */
 export function analyzeDecision(
   criteria: Criterion[],
   options: Option[],
-  confidence: number
+  confidence: number,
+  optionsConfig?: AnalyzeOptions
 ): AnalysisResult {
   const weightTotal = criteria.reduce((sum, c) => sum + c.weight, 0);
   const rankings = calculateOptionScores(criteria, options, confidence);
@@ -479,25 +518,7 @@ export function analyzeDecision(
     });
   }
 
-  // Run probabilistic simulation (5,000 iterations for sub-10ms UI performance)
-  const monteCarlo = runMonteCarloSimulation(criteria, options, confidence, 5000);
-
-  // Check for Probabilistic Rank Inversion (deterministic leader has lower win prob)
-  if (leader && monteCarlo.options.length > 1) {
-    const simLeader = monteCarlo.options[0];
-    if (simLeader.optionId !== leader.id && simLeader.winProbability > 50) {
-      insights.unshift({
-        id: "probabilistic-inversion",
-        type: "FRAGILITY",
-        severity: "high",
-        title: `Probabilistic Inversion: "${simLeader.optionName}" Wins ${simLeader.winProbability}% of Simulations`,
-        detail: `While "${leader.name}" has a marginally higher point estimate, "${simLeader.optionName}" wins the majority of simulated futures because it carries significantly lower downside variance.`,
-        recommendation: `Consider selecting "${simLeader.optionName}" as the risk-adjusted superior choice under real-world uncertainty.`,
-      });
-    }
-  }
-
-  return {
+  const baseResult: AnalysisResult = {
     rankings,
     leader,
     runnerUp,
@@ -508,6 +529,14 @@ export function analyzeDecision(
     insights,
     sensitivityGrid,
     multiMetric,
-    monteCarlo,
   };
+
+  if (optionsConfig?.skipMonteCarlo) {
+    return baseResult;
+  }
+
+  const iterations = optionsConfig?.monteCarloIterations ?? 5000;
+  const monteCarlo = runMonteCarloSimulation(criteria, options, confidence, iterations, optionsConfig?.seed);
+
+  return attachMonteCarloResult(baseResult, monteCarlo);
 }

@@ -58,7 +58,7 @@ test("runMonteCarloSimulation computes sound win probabilities and percentiles",
     { id: "o2", name: "Weaker Option", scores: { c1: 3, c2: 4 } },
   ];
 
-  const result = runMonteCarloSimulation(criteria, options, 80, 2000);
+  const result = runMonteCarloSimulation(criteria, options, 80, 2000, 42);
 
   assert.equal(result.options.length, 2);
   const totalProbability = result.options.reduce((sum, o) => sum + o.winProbability, 0);
@@ -77,3 +77,22 @@ test("runMonteCarloSimulation computes sound win probabilities and percentiles",
   assert.ok(opt1.var95 <= opt1.p10, "VaR 95% should be <= P10");
   assert.equal(opt1.histogram.length, 20, "Should generate 20 histogram bins");
 });
+
+test("runMonteCarloSimulation is 100% deterministic and reproducible when seeded", () => {
+  const criteria = [
+    { id: "c1", name: "Speed", weight: 50 },
+    { id: "c2", name: "Cost", weight: 50 },
+  ];
+  const options = [
+    { id: "o1", name: "Alpha", scores: { c1: 7, c2: 6 } },
+    { id: "o2", name: "Beta", scores: { c1: 6, c2: 7 } },
+  ];
+
+  const runA = runMonteCarloSimulation(criteria, options, 75, 1000, 12345);
+  const runB = runMonteCarloSimulation(criteria, options, 75, 1000, 12345);
+
+  assert.deepEqual(runA.options, runB.options);
+  assert.equal(runA.leaderId, runB.leaderId);
+  assert.equal(runA.leaderProbability, runB.leaderProbability);
+});
+

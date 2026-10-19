@@ -1,9 +1,15 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
-import { Decision, Criterion, Option } from "../lib/types";
+import { Decision, Criterion, Option, MonteCarloResult } from "../lib/types";
 import { DECISION_TEMPLATES } from "../lib/templates";
-import { analyzeDecision, normalizeWeights, autoBalanceWeights } from "../lib/engine";
+import {
+  analyzeDecision,
+  normalizeWeights,
+  autoBalanceWeights,
+  attachMonteCarloResult,
+} from "../lib/engine";
+import { runMonteCarloSimulation } from "../lib/monte-carlo";
 import { generateMarkdownBrief } from "../lib/export";
 import { Header } from "../components/Header";
 import { CriteriaPanel } from "../components/CriteriaPanel";
@@ -20,6 +26,15 @@ export default function Home() {
   const [view, setView] = useState<"matrix" | "insights" | "monte-carlo">("matrix");
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
+  const [monteCarloResult, setMonteCarloResult] = useState<MonteCarloResult | undefined>(() =>
+    runMonteCarloSimulation(
+      DECISION_TEMPLATES.career.criteria,
+      DECISION_TEMPLATES.career.options,
+      DECISION_TEMPLATES.career.confidence,
+      2000,
+      42
+    )
+  );
 
   // Restore decision from URL hash or localStorage on client mount
   useEffect(() => {
@@ -59,11 +74,35 @@ export default function Home() {
     }
   }, [decision, isMounted]);
 
-  // Compute live analysis via pure engine
-  const analysis = useMemo(
-    () => analyzeDecision(decision.criteria, decision.options, decision.confidence),
+  // Compute live deterministic analysis synchronously (<0.05ms) for butter-smooth 60 FPS slider dragging
+  const deterministicAnalysis = useMemo(
+    () =>
+      analyzeDecision(decision.criteria, decision.options, decision.confidence, {
+        skipMonteCarlo: true,
+      }),
     [decision.criteria, decision.options, decision.confidence]
   );
+
+  // Debounced non-blocking Monte Carlo simulation (150ms) so heavy sampling doesn't drop frames during rapid drags
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const mc = runMonteCarloSimulation(
+        decision.criteria,
+        decision.options,
+        decision.confidence,
+        5000
+      );
+      setMonteCarloResult(mc);
+    }, 150);
+
+    return () => clearTimeout(timer);
+  }, [decision.criteria, decision.options, decision.confidence]);
+
+  // Merge probabilistic distribution and inversion insights when Monte Carlo completes
+  const analysis = useMemo(() => {
+    if (!monteCarloResult) return deterministicAnalysis;
+    return attachMonteCarloResult(deterministicAnalysis, monteCarloResult);
+  }, [deterministicAnalysis, monteCarloResult]);
 
   const markdownBrief = useMemo(
     () => generateMarkdownBrief(decision, analysis),

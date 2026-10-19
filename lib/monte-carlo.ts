@@ -1,14 +1,29 @@
 import { Criterion, Option, ScoreRange, OptionSimulationResult, MonteCarloResult } from "./types";
 
 /**
+ * Fast 32-bit pseudo-random number generator (Mulberry32).
+ * Produces deterministic, high-entropy pseudorandom sequences in [0, 1)
+ * for reproducible unit tests and verifiable decision snapshots.
+ */
+export function createMulberry32(seed: number): () => number {
+  let s = seed | 0;
+  return function mulberry32(): number {
+    s = (s + 0x6d2b79f5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return (t >>> 0) / 4294967296;
+  };
+}
+
+/**
  * Marsaglia and Tsang's method for generating Gamma(alpha, 1) random variates.
  * Standard algorithm used in numerical statistical packages.
  */
-function sampleGamma(alpha: number): number {
+function sampleGamma(alpha: number, rng: () => number = Math.random): number {
   if (alpha < 1) {
     // Boost alpha by multiplying with Uniform^(1/alpha)
-    const u = Math.random();
-    return sampleGamma(alpha + 1) * Math.pow(u, 1 / alpha);
+    const u = rng();
+    return sampleGamma(alpha + 1, rng) * Math.pow(u || 1e-10, 1 / alpha);
   }
 
   const d = alpha - 1 / 3;
@@ -16,21 +31,21 @@ function sampleGamma(alpha: number): number {
 
   while (true) {
     // Generate standard normal variate using Box-Muller transform
-    const u1 = Math.random();
-    const u2 = Math.random();
+    const u1 = rng();
+    const u2 = rng();
     const z = Math.sqrt(-2 * Math.log(u1 || 1e-10)) * Math.cos(2 * Math.PI * u2);
 
     const v = 1 + c * z;
     if (v <= 0) continue;
 
     const v3 = v * v * v;
-    const u = Math.random();
+    const u = rng();
 
     if (u < 1 - 0.0331 * z * z * z * z) {
       return d * v3;
     }
 
-    if (Math.log(u) < 0.5 * z * z + d * (1 - v3 + Math.log(v3))) {
+    if (Math.log(u || 1e-10) < 0.5 * z * z + d * (1 - v3 + Math.log(v3))) {
       return d * v3;
     }
   }
@@ -40,7 +55,12 @@ function sampleGamma(alpha: number): number {
  * Samples a random variable from a Beta-PERT distribution with:
  * min = a, mode = m, max = b.
  */
-export function sampleBetaPert(min: number, mode: number, max: number): number {
+export function sampleBetaPert(
+  min: number,
+  mode: number,
+  max: number,
+  rng: () => number = Math.random
+): number {
   if (min >= max) return mode;
   const range = max - min;
 
@@ -48,8 +68,8 @@ export function sampleBetaPert(min: number, mode: number, max: number): number {
   const alpha = 1 + 4 * ((mode - min) / range);
   const beta = 1 + 4 * ((max - mode) / range);
 
-  const y1 = sampleGamma(alpha);
-  const y2 = sampleGamma(beta);
+  const y1 = sampleGamma(alpha, rng);
+  const y2 = sampleGamma(beta, rng);
   const betaSample = y1 / (y1 + y2 || 1e-10);
 
   return min + betaSample * range;
@@ -86,7 +106,8 @@ export function runMonteCarloSimulation(
   criteria: Criterion[],
   options: Option[],
   confidence: number,
-  iterations: number = 10000
+  iterations: number = 10000,
+  seed?: number
 ): MonteCarloResult {
   if (options.length === 0 || criteria.length === 0) {
     return {
@@ -97,6 +118,8 @@ export function runMonteCarloSimulation(
       summaryText: "No options or criteria to simulate.",
     };
   }
+
+  const rng = seed !== undefined ? createMulberry32(seed) : Math.random;
 
   const totalWeight = criteria.reduce((sum, c) => sum + Math.max(0, c.weight), 0) || 1;
   const normalizedWeights = criteria.map((c) => ({
@@ -129,7 +152,7 @@ export function runMonteCarloSimulation(
       for (let cIdx = 0; cIdx < normalizedWeights.length; cIdx++) {
         const { id, weightFraction } = normalizedWeights[cIdx];
         const range = rangeLookup.get(`${opt.id}__${id}`)!;
-        const sampledVal = sampleBetaPert(range.min, range.mode, range.max);
+        const sampledVal = sampleBetaPert(range.min, range.mode, range.max, rng);
         iterationScore += sampledVal * weightFraction;
       }
 
