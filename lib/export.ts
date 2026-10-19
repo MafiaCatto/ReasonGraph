@@ -42,13 +42,38 @@ export function generateMarkdownBrief(decision: Decision, analysis: AnalysisResu
   }
 
   // Sensitivity Analysis
-  if (breakEvens.length > 0 && runnerUp) {
-    md += `\n## 3. Sensitivity & Break-Even Analysis\n\n`;
-    md += `To overturn the current leader, *${runnerUp.name}* would need any **one** of the following score improvements:\n\n`;
-    for (const b of breakEvens.slice(0, 3)) {
-      md += `* **${b.criterionName}** (${b.weight}% weight): +${b.pointsNeeded.toFixed(1)} points ${
-        b.isFeasible ? "(Feasible within 1-10 range)" : "(Requires score > 10; cannot flip alone)"
-      }\n`;
+  if (runnerUp) {
+    md += `\n## 3. Dynamic Sensitivity Matrix & Multi-Metric Fragility\n\n`;
+
+    if (analysis.multiMetric) {
+      const mm = analysis.multiMetric;
+      md += `* **Multi-Metric Hyperplane Distance:** \`${mm.euclideanDistance}\` (${mm.resilienceLevel.replace("_", " ")})\n`;
+      md += `* **Simultaneous Drift Budget:** A collective drift of **±${mm.averageShiftNeeded} pts** across ${mm.favorableMetricsCount} metrics overturns the leader.\n`;
+      md += `* **Systemic Assessment:** ${mm.interpretation}\n\n`;
+    }
+
+    if (analysis.sensitivityGrid && analysis.sensitivityGrid.length > 0) {
+      md += `### Criteria Pivot Points (#1 vs Top Contenders)\n\n`;
+      md += `| Criterion | Weight | #1 ${leader?.name ?? "Leader"} | #2 ${runnerUp.name} | Δ to Flip (#1 vs #2) | Risk Status |\n`;
+      md += `| :--- | :---: | :---: | :---: | :---: | :---: |\n`;
+      for (const row of analysis.sensitivityGrid) {
+        const deltaStr = row.runnerUpAdvantage
+          ? "**Leader Trailing**"
+          : row.runnerUpFeasible
+          ? `+${row.runnerUpDelta} pts`
+          : ">10 (Infeasible)";
+        const statusStr =
+          row.riskStatus === "CRITICAL_DOWN"
+            ? "🔥 Trailing"
+            : row.riskStatus === "SPOF_HIGH"
+            ? "⚠️ High SPOF"
+            : row.riskStatus === "MODERATE"
+            ? "🟡 Moderate"
+            : "🟢 Resilient";
+
+        md += `| **${row.criterionName}** | ${row.weight}% | ${row.leaderScore} | ${row.runnerUpScore} | ${deltaStr} | ${statusStr} |\n`;
+      }
+      md += `\n`;
     }
   }
 

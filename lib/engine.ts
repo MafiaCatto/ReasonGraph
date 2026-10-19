@@ -1,4 +1,13 @@
-import { Criterion, Option, OptionScore, BreakEvenInsight, RedTeamInsight, AnalysisResult } from "./types";
+import {
+  Criterion,
+  Option,
+  OptionScore,
+  BreakEvenInsight,
+  RedTeamInsight,
+  AnalysisResult,
+  SensitivityRow,
+  MultiMetricSensitivity,
+} from "./types";
 import { runMonteCarloSimulation } from "./monte-carlo";
 
 /**
@@ -24,6 +33,58 @@ export function normalizeWeights(criteria: Criterion[]): Criterion[] {
     const scaled = Math.round((Math.max(0, c.weight) / currentTotal) * 100);
     accumulated += scaled;
     return { ...c, weight: scaled };
+  });
+}
+
+/**
+ * Proportionally adjusts all other weights when a single weight is moved,
+ * strictly conserving the invariant that sum(weights) == 100%.
+ */
+export function autoBalanceWeights(
+  criteria: Criterion[],
+  changedId: string,
+  rawNewWeight: number
+): Criterion[] {
+  if (criteria.length <= 1) {
+    return criteria.map((c) => ({ ...c, weight: 100 }));
+  }
+
+  const clampedNewWeight = Math.max(0, Math.min(100, Math.round(rawNewWeight)));
+  const remainingBudget = 100 - clampedNewWeight;
+
+  const otherCriteria = criteria.filter((c) => c.id !== changedId);
+  const currentOtherSum = otherCriteria.reduce((sum, c) => sum + Math.max(0, c.weight), 0);
+
+  let allocatedSum = 0;
+  const updatedOthers = otherCriteria.map((c) => {
+    let share = 0;
+    if (currentOtherSum === 0) {
+      share = Math.floor(remainingBudget / otherCriteria.length);
+    } else {
+      share = Math.round((Math.max(0, c.weight) / currentOtherSum) * remainingBudget);
+    }
+    allocatedSum += share;
+    return { ...c, weight: share };
+  });
+
+  // Fix rounding drift on the largest weight to strictly preserve 100%
+  const diff = remainingBudget - allocatedSum;
+  if (diff !== 0 && updatedOthers.length > 0) {
+    let maxIdx = 0;
+    for (let i = 1; i < updatedOthers.length; i++) {
+      if (updatedOthers[i].weight > updatedOthers[maxIdx].weight) {
+        maxIdx = i;
+      }
+    }
+    updatedOthers[maxIdx].weight = Math.max(0, updatedOthers[maxIdx].weight + diff);
+  }
+
+  return criteria.map((c) => {
+    if (c.id === changedId) {
+      return { ...c, weight: clampedNewWeight };
+    }
+    const found = updatedOthers.find((o) => o.id === c.id);
+    return found ?? c;
   });
 }
 
@@ -85,7 +146,6 @@ export function calculateBreakEvens(
   for (const c of criteria) {
     if (c.weight <= 0) continue;
 
-    // Delta required on this criterion: delta * (weight / 100) = margin
     const pointsNeeded = Number(((margin * 100) / c.weight).toFixed(2));
     const currentScore = runnerUp.scores[c.id] ?? 5;
     const targetScore = currentScore + pointsNeeded;
@@ -99,8 +159,136 @@ export function calculateBreakEvens(
     });
   }
 
-  // Sort by smallest swing required (most vulnerable pivot point)
   return insights.sort((a, b) => a.pointsNeeded - b.pointsNeeded);
+}
+
+/**
+ * Computes a full dynamic sensitivity matrix across all criteria against the top-3 contenders.
+ */
+export function computeSensitivityGrid(
+  leader: OptionScore | null,
+  runnerUp: OptionScore | null,
+  thirdPlace: OptionScore | null,
+  criteria: Criterion[]
+): SensitivityRow[] {
+  if (!leader) return [];
+
+  const margin12 = runnerUp ? Number((leader.rawTotal - runnerUp.rawTotal).toFixed(2)) : 0;
+  const margin13 = thirdPlace ? Number((leader.rawTotal - thirdPlace.rawTotal).toFixed(2)) : 0;
+
+  return criteria.map((c) => {
+    const w = Math.max(0, c.weight);
+    const sLead = leader.scores[c.id] ?? 5;
+    const sRunner = runnerUp?.scores[c.id] ?? 5;
+    const sThird = thirdPlace ? (thirdPlace.scores[c.id] ?? 5) : null;
+
+    // Runner-up (#2) dynamics
+    const runnerUpAdvantage = runnerUp ? sRunner > sLead : false;
+    let runnerUpDelta = 0;
+    let runnerUpFeasible = false;
+    if (runnerUp && !runnerUpAdvantage && w > 0) {
+      runnerUpDelta = Number(((margin12 * 100) / w).toFixed(1));
+      runnerUpFeasible = sRunner + runnerUpDelta <= 10.0;
+    }
+
+    // Third-place (#3) dynamics
+    let thirdAdvantage = false;
+    let thirdDelta: number | null = null;
+    let thirdFeasible = false;
+    if (thirdPlace && sThird !== null) {
+      thirdAdvantage = sThird > sLead;
+      if (!thirdAdvantage && w > 0) {
+        thirdDelta = Number(((margin13 * 100) / w).toFixed(1));
+        thirdFeasible = sThird + thirdDelta <= 10.0;
+      }
+    }
+
+    // Assign vulnerability status
+    let riskStatus: SensitivityRow["riskStatus"] = "RESILIENT";
+    if (runnerUpAdvantage) {
+      riskStatus = "CRITICAL_DOWN";
+    } else if (runnerUpDelta <= 1.5 && runnerUpFeasible) {
+      riskStatus = "SPOF_HIGH";
+    } else if (runnerUpDelta <= 3.0 && runnerUpFeasible) {
+      riskStatus = "MODERATE";
+    }
+
+    return {
+      criterionId: c.id,
+      criterionName: c.name,
+      weight: w,
+      leaderScore: sLead,
+      runnerUpScore: sRunner,
+      runnerUpDelta,
+      runnerUpFeasible,
+      runnerUpAdvantage,
+      thirdScore: sThird,
+      thirdDelta,
+      thirdFeasible,
+      thirdAdvantage,
+      riskStatus,
+    };
+  });
+}
+
+/**
+ * Calculates multi-metric gradient vector distance to decision boundary.
+ * Computes the shortest Euclidean path in criterion space required to dethrone the leader.
+ */
+export function calculateMultiMetricGradient(
+  leader: OptionScore | null,
+  runnerUp: OptionScore | null,
+  criteria: Criterion[]
+): MultiMetricSensitivity | null {
+  if (!leader || !runnerUp) return null;
+  const margin = Number((leader.rawTotal - runnerUp.rawTotal).toFixed(2));
+  if (margin <= 0) return null;
+
+  let sumSquaredDiffs = 0;
+  let favorableDiffSum = 0;
+  let favorableCount = 0;
+
+  for (const c of criteria) {
+    const sLead = leader.scores[c.id] ?? 5;
+    const sRunner = runnerUp.scores[c.id] ?? 5;
+    const diff = sLead - sRunner;
+
+    sumSquaredDiffs += diff * diff;
+    if (diff > 0) {
+      favorableDiffSum += diff;
+      favorableCount++;
+    }
+  }
+
+  const normD = Math.sqrt(sumSquaredDiffs);
+  if (normD === 0 || favorableCount === 0) return null;
+
+  // Shortest Euclidean distance to decision boundary: d* = Margin / ||D||_2
+  const euclideanDistance = Number((margin / normD).toFixed(3));
+  // Average shift needed across all favorable criteria to collectively erase margin
+  const averageShiftNeeded = Number((margin / favorableCount).toFixed(2));
+
+  let resilienceLevel: MultiMetricSensitivity["resilienceLevel"] = "HIGH_RESILIENCE";
+  if (euclideanDistance < 0.25) {
+    resilienceLevel = "HIGH_FRAGILITY";
+  } else if (euclideanDistance < 0.55) {
+    resilienceLevel = "MODERATE_RESILIENCE";
+  }
+
+  const interpretation =
+    resilienceLevel === "HIGH_FRAGILITY"
+      ? `High systemic fragility: a collective drift of only -${averageShiftNeeded} pts across ${favorableCount} metrics overturns the leader.`
+      : resilienceLevel === "MODERATE_RESILIENCE"
+      ? `Moderate resilience: leader survives isolated errors, but a collective -${averageShiftNeeded} pt shift across ${favorableCount} metrics ties the decision.`
+      : `High systemic resilience: leader maintains strong multi-variable distance (${euclideanDistance}) against collective domain drift.`;
+
+  return {
+    euclideanDistance,
+    averageShiftNeeded,
+    favorableMetricsCount: favorableCount,
+    resilienceLevel,
+    interpretation,
+  };
 }
 
 /**
@@ -215,7 +403,6 @@ export function generateRedTeamInsights(
     const mean = scores.reduce((a, b) => a + b, 0) / scores.length;
     const variance = scores.reduce((sum, s) => sum + Math.pow(s - mean, 2), 0) / scores.length;
 
-    // High variance (> 3.0) and low weight (<= 15%)
     if (variance > maxVariance && c.weight <= 20) {
       maxVariance = variance;
       highestVarianceCriterion = c;
@@ -273,9 +460,24 @@ export function analyzeDecision(
   const rankings = calculateOptionScores(criteria, options, confidence);
   const leader = rankings[0] ?? null;
   const runnerUp = rankings[1] ?? null;
+  const thirdPlace = rankings[2] ?? null;
   const margin = leader && runnerUp ? Number((leader.rawTotal - runnerUp.rawTotal).toFixed(2)) : 0;
   const breakEvens = calculateBreakEvens(leader, runnerUp, criteria);
   const insights = generateRedTeamInsights(rankings, criteria, confidence, breakEvens);
+  const sensitivityGrid = computeSensitivityGrid(leader, runnerUp, thirdPlace, criteria);
+  const multiMetric = calculateMultiMetricGradient(leader, runnerUp, criteria);
+
+  // Multi-Metric Systemic Vulnerability Alert
+  if (multiMetric && multiMetric.resilienceLevel === "HIGH_FRAGILITY") {
+    insights.unshift({
+      id: "multi-metric-fragility",
+      type: "FRAGILITY",
+      severity: "high",
+      title: `Systemic Fragility: Collective -${multiMetric.averageShiftNeeded} pt Drift Dethrones Leader`,
+      detail: `Rather than a large swing on one metric, small simultaneous estimation errors averaging only -${multiMetric.averageShiftNeeded} pts across ${multiMetric.favorableMetricsCount} criteria will overturn "${leader?.name}".`,
+      recommendation: `Check whether your top criteria share common failure modes (e.g. cost and complexity both increasing together).`,
+    });
+  }
 
   // Run probabilistic simulation (5,000 iterations for sub-10ms UI performance)
   const monteCarlo = runMonteCarloSimulation(criteria, options, confidence, 5000);
@@ -299,10 +501,13 @@ export function analyzeDecision(
     rankings,
     leader,
     runnerUp,
+    thirdPlace,
     margin,
     weightTotal,
     breakEvens,
     insights,
+    sensitivityGrid,
+    multiMetric,
     monteCarlo,
   };
 }

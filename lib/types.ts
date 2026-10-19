@@ -74,13 +74,40 @@ export type MonteCarloResult = {
   summaryText: string;
 };
 
+export type SensitivityRow = {
+  criterionId: string;
+  criterionName: string;
+  weight: number;
+  leaderScore: number;
+  runnerUpScore: number;
+  runnerUpDelta: number;
+  runnerUpFeasible: boolean;
+  runnerUpAdvantage: boolean; // true if runner-up already beats leader on this criterion
+  thirdScore: number | null;
+  thirdDelta: number | null;
+  thirdFeasible: boolean;
+  thirdAdvantage: boolean;
+  riskStatus: "CRITICAL_DOWN" | "SPOF_HIGH" | "MODERATE" | "RESILIENT";
+};
+
+export type MultiMetricSensitivity = {
+  euclideanDistance: number; // ||Delta*||_2
+  averageShiftNeeded: number; // average shift per favorable metric to reverse lead
+  favorableMetricsCount: number;
+  resilienceLevel: "HIGH_FRAGILITY" | "MODERATE_RESILIENCE" | "HIGH_RESILIENCE";
+  interpretation: string;
+};
+
 export type AnalysisResult = {
   rankings: OptionScore[];
   leader: OptionScore | null;
   runnerUp: OptionScore | null;
+  thirdPlace: OptionScore | null;
   margin: number;
   weightTotal: number;
   breakEvens: BreakEvenInsight[];
   insights: RedTeamInsight[];
+  sensitivityGrid: SensitivityRow[];
+  multiMetric: MultiMetricSensitivity | null;
   monteCarlo?: MonteCarloResult;
 };

@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Decision, Criterion, Option } from "../lib/types";
 import { DECISION_TEMPLATES } from "../lib/templates";
-import { analyzeDecision, normalizeWeights } from "../lib/engine";
+import { analyzeDecision, normalizeWeights, autoBalanceWeights } from "../lib/engine";
 import { generateMarkdownBrief } from "../lib/export";
 import { Header } from "../components/Header";
 import { CriteriaPanel } from "../components/CriteriaPanel";
@@ -147,6 +147,13 @@ export default function Home() {
     setDecision((prev) => ({
       ...prev,
       criteria: prev.criteria.map((c) => (c.id === id ? { ...c, weight } : c)),
+    }));
+  }
+
+  function handleSetWeightAutoBalance(id: string, weight: number) {
+    setDecision((prev) => ({
+      ...prev,
+      criteria: autoBalanceWeights(prev.criteria, id, weight),
     }));
   }
 
@@ -299,6 +306,7 @@ export default function Home() {
             weightTotal={analysis.weightTotal}
             onUpdateCriterion={handleUpdateCriterion}
             onSetWeight={handleSetWeight}
+            onSetWeightAutoBalance={handleSetWeightAutoBalance}
             onAddCriterion={handleAddCriterion}
             onRemoveCriterion={handleRemoveCriterion}
             onNormalize={handleNormalize}
@@ -325,9 +333,12 @@ export default function Home() {
         <RedTeamPanel
           leader={analysis.leader}
           runnerUp={analysis.runnerUp}
+          thirdPlace={analysis.thirdPlace}
           margin={analysis.margin}
           breakEvens={analysis.breakEvens}
           insights={analysis.insights}
+          sensitivityGrid={analysis.sensitivityGrid}
+          multiMetric={analysis.multiMetric}
         />
       )}
 

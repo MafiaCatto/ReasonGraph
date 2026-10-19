@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { Criterion } from "../lib/types";
 
 type CriteriaPanelProps = {
@@ -8,6 +8,7 @@ type CriteriaPanelProps = {
   weightTotal: number;
   onUpdateCriterion: (id: string, name: string) => void;
   onSetWeight: (id: string, weight: number) => void;
+  onSetWeightAutoBalance: (id: string, weight: number) => void;
   onAddCriterion: () => void;
   onRemoveCriterion: (id: string) => void;
   onNormalize: () => void;
@@ -18,21 +19,48 @@ export function CriteriaPanel({
   weightTotal,
   onUpdateCriterion,
   onSetWeight,
+  onSetWeightAutoBalance,
   onAddCriterion,
   onRemoveCriterion,
   onNormalize,
 }: CriteriaPanelProps) {
+  const [autoBalance, setAutoBalance] = useState(true);
+
   return (
     <aside className="criteria-panel">
       <div className="section-kicker">Core values & priorities</div>
       <div className="section-heading">
         <h2>Decision criteria</h2>
-        <button onClick={onNormalize} title="Proportionally scale weights to sum to 100%">
-          Normalize
-        </button>
+        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          <label
+            style={{
+              font: "9px var(--font-geist-mono)",
+              color: autoBalance ? "var(--blue)" : "var(--muted)",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: "4px",
+            }}
+            title="Automatically redistributes remaining weights to strictly preserve 100% total"
+          >
+            <input
+              type="checkbox"
+              checked={autoBalance}
+              onChange={(e) => setAutoBalance(e.target.checked)}
+              style={{ accentColor: "var(--blue)", cursor: "pointer" }}
+            />
+            Auto-Balance
+          </label>
+          <button onClick={onNormalize} title="Proportionally scale weights to sum to 100%">
+            Normalize
+          </button>
+        </div>
       </div>
 
-      <p>Weights reflect what matters to you—not merely what is easy to measure.</p>
+      <p>
+        Weights reflect what matters to you—not merely what is easy to measure.
+        {autoBalance && " Auto-balance is active: adjusting any slider conserves 100% total."}
+      </p>
 
       <div className={`weight-total ${weightTotal === 100 ? "valid" : ""}`}>
         <span>Total weight</span>
@@ -65,9 +93,16 @@ export function CriteriaPanel({
               aria-label={`${c.name} weight`}
               type="range"
               min="0"
-              max="60"
+              max="90"
               value={c.weight}
-              onChange={(e) => onSetWeight(c.id, Number(e.target.value))}
+              onChange={(e) => {
+                const val = Number(e.target.value);
+                if (autoBalance) {
+                  onSetWeightAutoBalance(c.id, val);
+                } else {
+                  onSetWeight(c.id, val);
+                }
+              }}
             />
           </div>
         ))}

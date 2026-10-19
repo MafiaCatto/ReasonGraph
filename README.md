@@ -23,6 +23,9 @@ ReasonGraph tackles these directly by separating **values** (weights) from **evi
 ## Key Features
 
 - **Weighted Decision Matrix**: Score competing options against customizable criteria with single-click proportional weight normalization.
+- **Dynamic Proportional Auto-Balancing**: Optional slider mode that strictly conserves the invariant $\sum W_i = 100\%$ live on every drag by scaling all other criteria proportionally.
+- **Full Dynamic Sensitivity Grid**: Analyzes breaking point thresholds across *every* criterion against the top-3 contenders simultaneously (#1 vs #2 and #1 vs #3).
+- **Multi-Metric Gradient Vector Sensitivity**: Calculates the shortest Euclidean distance $\|\vec{\Delta}^*\|_2$ to the decision hyperplane to measure vulnerability when multiple criteria drift collectively.
 - **Monte Carlo Probabilistic Simulation Engine**:
   - Simulates 10,000 alternate futures using continuous **Beta-PERT probability distributions** ($a$: pessimistic, $m$: most likely, $b$: optimistic).
   - Quantifies **True Win Probability** (e.g. Option A wins in 68.4% of simulated futures).
@@ -31,6 +34,7 @@ ReasonGraph tackles these directly by separating **values** (weights) from **evi
   - Renders **Interactive Overlapping SVG Probability Density Curves**.
 - **Break-Even Sensitivity Analysis**: Calculates the exact point delta ($\Delta$) required on each criterion for the runner-up to bridge the margin and overturn the leader.
 - **Dynamic Red-Team Stress Test**:
+  - **Multi-Metric Fragility Alert**: Warns when small simultaneous drifts across multiple criteria collectively dethrone the leader.
   - **Probabilistic Inversion Alert**: Flags scenarios where the deterministic leader has a lower probability of winning due to extreme volatility.
   - **Lead Fragility Indicator**: Highlights when a leader holds a fragile victory margin (< 0.6 pts) versus a robust advantage.
   - **Single Point of Failure (SPOF)**: Identifies which criterion carries the highest decision leverage.
@@ -144,6 +148,18 @@ For 3-point estimates with pessimistic bound $a$, mode $m$, and optimistic bound
 ### 4. Value-at-Risk (VaR at 95%)
 $$\text{VaR}_{0.95}(O_j) = \inf \{ t \in \mathbb{R} : P(T_j \le t) \ge 0.05 \}$$
 representing the 5th-percentile downside outcome below which only 5% of simulated futures fall.
+
+### 5. Multi-Metric Hyperplane Distance & Shortest Reversal Vector
+When multiple criteria drift simultaneously, the boundary where Option R (runner-up) overtakes Option L (leader) forms an $(n-1)$-dimensional decision hyperplane:
+$$\text{Margin} + \sum_{i=1}^n \Delta_i \cdot (S_{L,i} - S_{R,i}) = 0$$
+
+Let $\vec{D} = [S_{L,1} - S_{R,1}, \dots, S_{L,n} - S_{R,n}]$ be the score difference vector across all $n$ criteria. The shortest Euclidean perturbation vector $\vec{\Delta}^*$ required to cross this decision boundary is:
+$$\vec{\Delta}^* = -\text{Margin} \cdot \frac{\vec{D}}{\|\vec{D}\|_2^2}$$
+
+The shortest Euclidean distance from the current evaluation to the decision reversal boundary is:
+$$d^* = \|\vec{\Delta}^*\|_2 = \frac{\text{Margin}}{\sqrt{\sum_{k=1}^n (S_{L,k} - S_{R,k})^2}}$$
+
+A small $d^* < 0.25$ indicates **High Systemic Fragility**, meaning minor correlated slippage across multiple criteria will overturn the decision even if no single criterion reaches its individual 1D break-even threshold.
 
 ---
 
